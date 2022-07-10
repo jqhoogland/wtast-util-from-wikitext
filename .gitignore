@@ -1,7 +1,8 @@
-.DS_Store
-*.log
-.nyc_output/
 coverage/
 node_modules/
+/lib/
+/index.js
+*.d.ts
+*.log
+.DS_Store
 yarn.lock
-mdast-util-from-markdown.min.js

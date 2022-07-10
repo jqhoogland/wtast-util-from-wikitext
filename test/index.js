@@ -1,16 +1,24 @@
-'use strict'
+/**
+ * @typedef {import('mdast').Root} Root
+ */
 
-var fs = require('fs')
-var path = require('path')
-var test = require('tape')
-var unified = require('unified')
-var parse = require('remark-parse')
-var visit = require('unist-util-visit')
-var fromMarkdown = require('..')
+import {Buffer} from 'node:buffer'
+import fs from 'fs'
+import path from 'path'
+import assert from 'assert'
+import test from 'tape'
+import {unified} from 'unified'
+import rehypeParse from 'rehype-parse'
+import rehypeStringify from 'rehype-stringify'
+import {toHast} from 'mdast-util-to-hast'
+import {toString} from 'mdast-util-to-string'
+import {toHtml} from 'hast-util-to-html'
+import {commonmark} from 'commonmark.json'
+import {fromMarkdown} from '../dev/index.js'
 
-var join = path.join
+const join = path.join
 
-test('mdast-util-from-markdown', function (t) {
+test('mdast-util-from-markdown', (t) => {
   t.equal(typeof fromMarkdown, 'function', 'should expose a function')
 
   t.deepEqual(
@@ -55,6 +63,254 @@ test('mdast-util-from-markdown', function (t) {
       }
     },
     'should parse a paragraph'
+  )
+
+  t.equal(
+    toString(fromMarkdown(Buffer.from([0x62, 0x72, 0xc3, 0xa1, 0x76, 0x6f]))),
+    'brávo',
+    'should support buffers'
+  )
+
+  t.equal(
+    toString(
+      fromMarkdown(Buffer.from([0x62, 0x72, 0xc3, 0xa1, 0x76, 0x6f]), 'ascii')
+    ),
+    'brC!vo',
+    'should support encoding'
+  )
+
+  t.deepEqual(
+    fromMarkdown('a\nb', {
+      mdastExtensions: [
+        {
+          // Unknown objects are used, but have no effect.
+          unknown: undefined,
+          // `canContainEols` is an array.
+          canContainEols: ['someType'],
+          enter: {
+            lineEnding(token) {
+              this.enter({type: 'break'}, token)
+            }
+          },
+          exit: {
+            lineEnding(token) {
+              this.exit(token)
+            }
+          }
+        }
+      ]
+    }).children[0],
+    {
+      type: 'paragraph',
+      children: [
+        {
+          type: 'text',
+          value: 'a',
+          position: {
+            start: {line: 1, column: 1, offset: 0},
+            end: {line: 1, column: 2, offset: 1}
+          }
+        },
+        {
+          type: 'break',
+          position: {
+            start: {line: 1, column: 2, offset: 1},
+            end: {line: 2, column: 1, offset: 2}
+          }
+        },
+        {
+          type: 'text',
+          value: 'b',
+          position: {
+            start: {line: 2, column: 1, offset: 2},
+            end: {line: 2, column: 2, offset: 3}
+          }
+        }
+      ],
+      position: {
+        start: {line: 1, column: 1, offset: 0},
+        end: {line: 2, column: 2, offset: 3}
+      }
+    },
+    'should support extensions'
+  )
+
+  t.deepEqual(
+    fromMarkdown('a\nb', {
+      mdastExtensions: [
+        [
+          {
+            enter: {
+              lineEnding(token) {
+                this.enter({type: 'break'}, token)
+              }
+            }
+          },
+          {
+            exit: {
+              lineEnding(token) {
+                this.exit(token)
+              }
+            }
+          }
+        ]
+      ]
+    }).children[0],
+    {
+      type: 'paragraph',
+      children: [
+        {
+          type: 'text',
+          value: 'a',
+          position: {
+            start: {line: 1, column: 1, offset: 0},
+            end: {line: 1, column: 2, offset: 1}
+          }
+        },
+        {
+          type: 'break',
+          position: {
+            start: {line: 1, column: 2, offset: 1},
+            end: {line: 2, column: 1, offset: 2}
+          }
+        },
+        {
+          type: 'text',
+          value: 'b',
+          position: {
+            start: {line: 2, column: 1, offset: 2},
+            end: {line: 2, column: 2, offset: 3}
+          }
+        }
+      ],
+      position: {
+        start: {line: 1, column: 1, offset: 0},
+        end: {line: 2, column: 2, offset: 3}
+      }
+    },
+    'should support multiple extensions'
+  )
+
+  t.deepEqual(
+    fromMarkdown('*a*', {
+      mdastExtensions: [
+        {
+          transforms: [
+            function (tree) {
+              assert(tree.children[0].type === 'paragraph')
+              tree.children[0].children[0].type = 'strong'
+            }
+          ]
+        }
+      ]
+    }).children[0],
+    {
+      type: 'paragraph',
+      children: [
+        {
+          type: 'strong',
+          children: [
+            {
+              type: 'text',
+              value: 'a',
+              position: {
+                start: {line: 1, column: 2, offset: 1},
+                end: {line: 1, column: 3, offset: 2}
+              }
+            }
+          ],
+          position: {
+            start: {line: 1, column: 1, offset: 0},
+            end: {line: 1, column: 4, offset: 3}
+          }
+        }
+      ],
+      position: {
+        start: {line: 1, column: 1, offset: 0},
+        end: {line: 1, column: 4, offset: 3}
+      }
+    },
+    'should support `transforms` in extensions'
+  )
+
+  t.throws(
+    () => {
+      fromMarkdown('a', {
+        mdastExtensions: [
+          {
+            enter: {
+              paragraph(token) {
+                this.enter({type: 'paragraph', children: []}, token)
+              }
+            },
+            exit: {paragraph() {}}
+          }
+        ]
+      })
+    },
+    /Cannot close document, a token \(`paragraph`, 1:1-1:2\) is still open/,
+    'should crash if a token is opened but not closed'
+  )
+
+  t.throws(
+    () => {
+      fromMarkdown('a', {
+        mdastExtensions: [
+          {
+            enter: {
+              paragraph(token) {
+                this.exit(token)
+              }
+            }
+          }
+        ]
+      })
+    },
+    /Cannot close `paragraph` \(1:1-1:2\): it’s not open/,
+    'should crash when closing a token that isn’t open'
+  )
+
+  t.throws(
+    () => {
+      fromMarkdown('a', {
+        mdastExtensions: [
+          {
+            exit: {
+              paragraph(token) {
+                this.exit(Object.assign({}, token, {type: 'lol'}))
+              }
+            }
+          }
+        ]
+      })
+    },
+    /Cannot close `lol` \(1:1-1:2\): a different token \(`paragraph`, 1:1-1:2\) is open/,
+    'should crash when closing a token when a different one is open'
+  )
+
+  t.throws(
+    () => {
+      fromMarkdown('a', {
+        mdastExtensions: [
+          {
+            exit: {
+              paragraph(token) {
+                this.exit(
+                  Object.assign({}, token, {type: 'lol'}),
+                  function (a, b) {
+                    t.equal(a.type, 'lol')
+                    t.equal(b.type, 'paragraph')
+                    throw new Error('problem')
+                  }
+                )
+              }
+            }
+          }
+        ]
+      })
+    },
+    /problem/,
+    'should crash when closing a token when a different one is open with a custom handler'
   )
 
   t.deepEqual(
@@ -636,6 +892,40 @@ test('mdast-util-from-markdown', function (t) {
   )
 
   t.deepEqual(
+    fromMarkdown('[`a`][]\n\n[`a`]: b').children[0],
+    {
+      type: 'paragraph',
+      children: [
+        {
+          type: 'linkReference',
+          children: [
+            {
+              type: 'inlineCode',
+              value: 'a',
+              position: {
+                start: {line: 1, column: 2, offset: 1},
+                end: {line: 1, column: 5, offset: 4}
+              }
+            }
+          ],
+          position: {
+            start: {line: 1, column: 1, offset: 0},
+            end: {line: 1, column: 8, offset: 7}
+          },
+          identifier: '`a`',
+          label: '`a`',
+          referenceType: 'collapsed'
+        }
+      ],
+      position: {
+        start: {line: 1, column: 1, offset: 0},
+        end: {line: 1, column: 8, offset: 7}
+      }
+    },
+    'should parse a link (collapsed reference) with inline code in the label'
+  )
+
+  t.deepEqual(
     fromMarkdown('[a][b]\n\n[b]: c').children[0],
     {
       type: 'paragraph',
@@ -750,84 +1040,57 @@ test('mdast-util-from-markdown', function (t) {
   t.end()
 })
 
-test('fixtures', function (t) {
-  var base = join('test', 'fixtures')
+test('fixtures', (t) => {
+  const base = join('test', 'fixtures')
+  const files = fs.readdirSync(base).filter((d) => path.extname(d) === '.md')
+  let index = -1
 
-  // These are different (in a good way) from remark.
-  var fixesRemark = [
-    'attention',
-    'code-indented',
-    'definition',
-    'hard-break-escape',
-    'hard-break-prefix',
-    'heading-setext',
-    'html-text',
-    'image-reference',
-    'image-resource',
-    'link-reference',
-    'link-resource',
-    'list'
-  ]
-
-  fs.readdirSync(base)
-    .filter((d) => path.extname(d) === '.md')
-    .forEach((d) => each(path.basename(d, path.extname(d))))
-
-  t.end()
-
-  function each(stem) {
-    var fp = join(base, stem + '.json')
-    var doc = fs.readFileSync(join(base, stem + '.md'))
-    var actual = fromMarkdown(doc)
-    var remarkTree = remarkLegacyParse(String(doc))
-    var expected
+  while (++index < files.length) {
+    const file = files[index]
+    const stem = path.basename(file, path.extname(file))
+    const fp = join(base, stem + '.json')
+    const doc = fs.readFileSync(join(base, stem + '.md'))
+    const actual = fromMarkdown(doc)
+    /** @type {Root} */
+    let expected
 
     try {
-      expected = JSON.parse(fs.readFileSync(fp))
-    } catch (_) {
+      expected = JSON.parse(String(fs.readFileSync(fp)))
+    } catch {
       // New fixture.
       expected = actual
       fs.writeFileSync(fp, JSON.stringify(actual, null, 2) + '\n')
     }
 
     t.deepEqual(actual, expected, stem)
-
-    if (fixesRemark.includes(stem)) return
-
-    t.deepEqual(actual, remarkTree, stem + ' (remark)')
   }
+
+  t.end()
 })
 
-function remarkLegacyParse(doc) {
-  var processor = unified().use(parse, {commonmark: true}).use(clean)
-  return processor.runSync(processor.parse(doc))
-}
+test('commonmark', (t) => {
+  let index = -1
 
-function clean() {
-  return transform
-
-  function transform(tree) {
-    visit(tree, (node, index, parent) => {
-      var siblings = parent ? parent.children : []
-      var previous = siblings[index - 1]
-
-      // Drop don’t do indent anymore.
-      delete node.position.indent
-
-      // Collapse text nodes.
-      if (previous && node.type === previous.type && node.type === 'text') {
-        previous.value += node.value
-
-        siblings.splice(index, 1)
-
-        if (previous.position && node.position) {
-          previous.position.end = node.position.end
-        }
-
-        return index
-      }
+  while (++index < commonmark.length) {
+    const example = commonmark[index]
+    const root = fromMarkdown(example.markdown.slice(0, -1))
+    const hast = toHast(root, {allowDangerousHtml: true})
+    assert(hast && hast.type === 'root', 'expected `root`')
+    const html = toHtml(hast, {
+      allowDangerousHtml: true,
+      entities: {useNamedReferences: true},
+      closeSelfClosing: true
     })
 
-    return JSON.parse(JSON.stringify(tree))
+    const reformat = unified()
+      .use(rehypeParse, {fragment: true})
+      .use(rehypeStringify)
+
+    const actual = reformat.processSync(html).toString()
+    const expected = reformat.processSync(example.html.slice(0, -1)).toString()
+
+    t.deepLooseEqual(actual, expected, example.section + ' (' + index + ')')
   }
-}
+
+  t.end()
+})
