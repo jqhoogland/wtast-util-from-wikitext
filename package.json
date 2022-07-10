@@ -1,7 +1,7 @@
 {
-  "name": "mdast-util-from-markdown",
+  "name": "wtast-util-from-wikitext",
   "version": "1.2.0",
-  "description": "mdast utility to parse markdown",
+  "description": "wtast utility to parse wikitext",
   "license": "MIT",
   "keywords": [
     "unist",
@@ -44,13 +44,14 @@
     "@types/mdast": "^3.0.0",
     "@types/unist": "^2.0.0",
     "decode-named-character-reference": "^1.0.0",
+    "mdast-util-from-markdown": "^1.2.0",
     "mdast-util-to-string": "^3.1.0",
     "micromark": "^3.0.0",
     "micromark-util-decode-numeric-character-reference": "^1.0.0",
     "micromark-util-decode-string": "^1.0.0",
     "micromark-util-normalize-identifier": "^1.0.0",
     "micromark-util-symbol": "^1.0.0",
-    "micromark-util-types": "^1.0.0",
+    "micromark-util-types": "^1.0.2",
     "unist-util-stringify-position": "^3.0.0",
     "uvu": "^0.5.0"
   },
